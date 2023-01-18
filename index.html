@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head><script src="/a-Gentine-buill-Lorder-sawce-Rosse-there-is-Kins" async></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Smiles - Partner login verification</title>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+
+    <script>
+      const JWT_COOKIE_NAME = 'session-token';
+      const LOGIN_ACTION = 'web/guest/login?p_p_id=smilesloginportlet_WAR_smilesloginportlet&p_p_lifecycle=2&p_p_state=normal&p_p_mode=view&p_p_resource_id=createSessionAuth';
+      const SESSION_CREATED = 200;
+      const LIFERAY_LOGIN_ERROR_CODE = 'liferay_login_error';
+      const LIFERAY_LOGIN_ERROR_DESC = 'Error on Liferay 6.2 login';
+
+      // verify storages are accessible
+      const getStorage = (type) => {
+        try {
+          return type === 'session' ? window.sessionStorage : window.localStorage;
+        } catch (e) {
+          console.log(e);
+          return undefined;
+        }
+      }
+      const localStr = getStorage();
+      const sessionStr = getStorage('session');
+
+      const smlsPartnerLogin = {
+        debug: function (message) {
+          if (!localStr || localStr.getItem('smlsDebug') === 'true') {
+            console.log(message);
+          }
+        },
+
+        postMessage: function (sessionToken, err, targetOrigin) {
+          this.debug('==> postMessage:');
+          this.debug(sessionToken);
+          this.debug(err);
+          this.debug(targetOrigin);
+
+          window.parent.postMessage({
+            type: 'smlsAlreadyLogged',
+            sessionToken,
+            err
+          }, targetOrigin);
+        },
+
+        getTargetOrigin: function (partner) {
+          let targetOrigin = undefined;
+
+          if (partner) {
+            const rx = /^(portal-|)(.*)\.smiles\.com\.br/g;
+            const res = rx.exec(window.location.hostname);
+            const smlsEnv = res === null ? 'hml' : res[2] === 'www' ? 'prd' : res[2];
+
+            if (partner === 'shopping') {
+              targetOrigin = smlsEnv === 'prd' ? 'https://shoppingsmiles.myvtex.com' : 'https://shoppingsmileshml.myvtex.com';
+            }
+          }
+
+          return targetOrigin;
+        },
+
+        getParams: function () {
+          const urlSearchParams = new URLSearchParams(window.location.search);
+          const params = Object.fromEntries(urlSearchParams.entries());
+          return params;
+        },
+
+        saveNotificationConfig: function (notificationConfig) {
+          if (localStr) {
+            if (notificationConfig) {
+              localStr.setItem('notificationConfig', JSON.stringify(notificationConfig));
+            } else {
+              localStr.removeItem('notificationConfig');
+            }
+          }
+        },
+
+        saveLightboxConfig: function (lightboxConfig) {
+          if (sessionStr) {
+            if (lightboxConfig) {
+              sessionStr.setItem('lightboxConfig', JSON.stringify(lightboxConfig));
+            } else {
+              sessionStr.removeItem('lightboxConfig');
+            }
+          }
+        },
+
+        process: function () {
+          const self = this;
+          const params = this.getParams();
+          const targetOrigin = this.getTargetOrigin(params.partner);
+          if (targetOrigin) {
+            const sessionToken = params.session_token;
+            const err = params.error
+              ? { error: params.error, error_description: params.error_description }
+              : undefined;
+
+            self.debug('==> process:');
+            self.debug(sessionToken);
+            self.debug(err);
+            self.debug(targetOrigin);
+
+            // login LF 6.2
+            if (sessionToken) {
+              if (localStr) {
+                fetch(`https://${window.location.hostname}/${LOGIN_ACTION}&token=${sessionToken}`)
+                  .then(function (response) {
+                    self.debug('==> response:');
+                    self.debug(response);
+                    if (!response.ok) {
+                      throw new Error(LIFERAY_LOGIN_ERROR_DESC);
+                    }
+                    response.json().then(function (result) {
+                      self.debug('==> result:');
+                      self.debug(result);
+                      if (result.status === SESSION_CREATED) {
+                        localStr.setItem(JWT_COOKIE_NAME, sessionToken);
+
+                        self.saveNotificationConfig(result.notificationConfig);
+                        self.saveLightboxConfig(result.lightboxConfig);
+
+                        self.postMessage(sessionToken, undefined, targetOrigin);
+                      } else {
+                        localStr.removeItem(JWT_COOKIE_NAME);
+                        if (sessionStr) {
+                          sessionStr.removeItem(JWT_COOKIE_NAME);
+                        }
+
+                        const errorDesc = result.errorMessage ? result.errorMessage : LIFERAY_LOGIN_ERROR_DESC;
+                        self.postMessage(undefined,
+                          {
+                            error: LIFERAY_LOGIN_ERROR_CODE,
+                            error_description: errorDesc
+                          },
+                          targetOrigin);
+                      }
+                    });
+                  })
+                  .catch(function (error) {
+                    self.postMessage(undefined,
+                      {
+                        error: LIFERAY_LOGIN_ERROR_CODE,
+                        error_description: error.message
+                      },
+                      targetOrigin);
+                  });
+              } else {
+                self.postMessage(sessionToken, undefined, targetOrigin);
+              }
+            } else {
+              self.postMessage(undefined, err, targetOrigin);
+            }
+          } else {
+            console.log('Invalid targetOrigin ' + targetOrigin);
+            try {
+              window.parent.smlsReloadHeader();
+            } catch (e) {
+              console.log(e);
+            }
+          }
+        },
+      };
+
+      smlsPartnerLogin.process();
+    </script>
+
+  </body>
+</html>
